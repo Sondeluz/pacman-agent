@@ -28,6 +28,30 @@ TURNS_HAS_TO_FLEE = 6
 class AttackAgent(CaptureAgent):
     """
     Our Attack agent, exclusively based on A* and planning rules
+    The overall strategy is as follows:
+        - At the start of the game, randomly go to the top closest enemy foods 
+          (the defenders should usually go to the closest one too, so this way we can "confuse" them)
+        - When attacking:
+            - If there are no enemies close, we go to the closest food or capsule
+            - If there are enemies close, start going towards the closest point in our field
+
+        As special behavior modifiers, the attacker will:
+            - Ignore enemies when having a capsule for CAPSULE_EFFECT_DURATION turns (less than the real ones, to avoid being too reckless)
+            - Go back to our field when having eaten FOOD_EATEN_TO_RETURN foods
+                - While going back and there are no enemies close, try to eat foods within a distance 1 even
+                  if A* told us to do another action
+            - Avoid calculating routes within the enemy field that cross through enemy 
+              surrounding areas (via A* heuristics)
+            - When trying to go towards the enemy field, if the attacker has been fleeing for many consecutive turns, it will
+              go to different close positions in our field and attack from there again, in order to confuse the defender 
+              and avoid deadlocks
+
+        There are also failsafes built on top of A*, so that:
+            - If A* attempts to go towards a position that is reachable by an enemy in the next turn(s), go to another one
+            - Although the agent is very efficient, we have made small improvements such as storing paths when going towards an initial position,
+              with added failsafes when pacman dies
+                
+        All heuristic and misc. values that affect the behavior are configurable in the global variables above
     """
     logging.getLogger().setLevel(logging.INFO)
 
@@ -47,7 +71,7 @@ class AttackAgent(CaptureAgent):
     turn_counter = 0
     has_fled = []
 
-    fleeing_actions = []
+    fleeing_point = None
     turns_has_to_flee = 0
     last_fled_turn_checked = 0
 
@@ -100,7 +124,6 @@ class AttackAgent(CaptureAgent):
             logging.info(
                 f"Attacker: I have been killed while going to my initial position or fleeing! Resetting actions...")
             self.first_actions = []
-            self.fleeing_actions = []
             self.turns_has_to_flee = 0
 
         food_in_current_turn = len(get_food_positions_enemy(self, game_state))
@@ -186,33 +209,31 @@ class AttackAgent(CaptureAgent):
                                          game_state)
         elif self.turns_has_to_flee > 0:
             # Continue going towards the fleeing point
-            logging.info("Attacker: I have to keep fleeing towards a defender's patrol point, enemies close")
-            if len(self.fleeing_actions) > 0:
-                return self.fleeing_actions.pop(0)
-            else:
-                fleeing_point = self.get_fleeing_point(game_state)
+            logging.info(f"Attacker: I have to keep fleeing towards a defender's patrol point for {self.turns_has_to_flee} turns, enemies close")
+            if self.fleeing_point == get_our_position(self, game_state): # Go to a new one
+                self.fleeing_point = self.get_fleeing_point(game_state)
 
-                _, self.fleeing_actions = aStarSearch(self,
+            _, fleeing_actions = aStarSearch(self,
                                                       get_our_position(self, game_state),
-                                                      fleeing_point,
+                                                      self.fleeing_point,
                                                       game_state)
-                return self.fleeing_actions.pop(0)
+            return fleeing_actions[0]
 
         if self.has_been_fleeing_too_much(game_state):
             if len(get_food_positions_ours(self, game_state)) == 0:  # They have eaten all our foods
                 return "Stop"
 
-            fleeing_point = self.get_fleeing_point(game_state)
+            self.fleeing_point = self.get_fleeing_point(game_state)
 
             self.turns_has_to_flee = TURNS_HAS_TO_FLEE
 
-            logging.info(f"Attacker: I have been fleeing too much, going to random close enemy food ({fleeing_point})")
+            logging.info(f"Attacker: I have been fleeing too much, going to random close enemy food ({self.fleeing_point})")
 
-            _, self.fleeing_actions = aStarSearch(self,
+            _, fleeing_actions = aStarSearch(self,
                                                   get_our_position(self, game_state),
-                                                  fleeing_point,
+                                                  self.fleeing_point,
                                                   game_state)
-            return self.fleeing_actions.pop(0)
+            return fleeing_actions[0]
         else:
             dest, next_actions = a_star_to_food_position(self, game_state, get_food_positions_enemy, randomize=False)
             logging.info(f"Attacker: Going to closest enemy food ({dest})")

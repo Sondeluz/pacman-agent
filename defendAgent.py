@@ -7,13 +7,9 @@ from captureAgents import CaptureAgent
 from shared import (aStarSearch,
                     in_our_field,
                     a_star_to_food_position,
-                    avoid_enemy_collision,
-                    get_closest_point_in_our_field,
-                    get_food_positions_enemy,
                     get_our_position,
                     get_initial_enemy_position,
                     get_food_positions_ours,
-                    get_legal_actions_own,
                     get_column_slice)
 
 COST_HEURISTIC_CROSSING_ENEMY_FIELD = 5
@@ -24,7 +20,32 @@ COST_HEURISTIC_ENEMY_CLOSE = 5
 
 class DefendAgent(CaptureAgent):
     """
-    Our defend agent, exclusively based on A* and planning rules
+    Our Defend agent, exclusively based on A* and planning rules
+
+    The overall strategy is as follows:
+        - At the start of the game, go to the top closest food in our field (from the enemy's perspective) 
+        - When defending:
+            - If there are no enemies close but we have detected that a food within our field has been 
+              eaten, go towards it (if new food is eaten in future turns, it will go to the newest ones)
+
+            - If there are no enemies close, do a vertical patrol within the same column as the closest 
+              food from the enemy's perspective (recalculated when eaten)
+
+            - If there are enemies close in our field, start going towards them
+
+            - After having done any 'extra' action, go back to perform the patrol
+
+        As special behavior modifiers, the defender will:
+            - Flee from enemies when they have a capsule for CAPSULE_EFFECT_DURATION turns or 
+              go back to a patrol if it is not able to see them (in hopes that it will catch them 
+              when they go if they don't have the effect anymore). If it was fleeing, it will immediately 
+              attack them when the effect ends 
+
+        There are also failsafes built on top of A*, so that:
+            - Although the agent is very efficient, we have made small improvements such as storing paths when going towards an initial position,
+              with added failsafes when pacman dies
+                
+        All heuristic and misc. values that affect the behavior are configurable in the global variables above
     """
     logging.getLogger().setLevel(logging.INFO)
 
